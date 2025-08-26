@@ -1,0 +1,19 @@
+name: Test Dispatch Receiver
+
+on:
+  repository_dispatch:
+    types: [rke2-release-validation]
+
+jobs:
+  test-receive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show received dispatch data
+        run: |
+          echo "🎉 Repository dispatch received!"
+          echo "Event type: ${{ github.event.action }}"
+          echo "RKE2 Versions: ${{ github.event.client_payload.rke2_versions }}"
+          echo "Source Repo: ${{ github.event.client_payload.source_repo }}"
+          echo "Release URL: ${{ github.event.client_payload.release_url }}"
+          echo "Triggered by: ${{ github.event.client_payload.triggered_by }}"
+          echo "✅ Test dispatch successful!"

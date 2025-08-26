@@ -14,119 +14,69 @@ jobs:
       matrix:
         os:
           - "centos7"
-          - "centos8"
-          - "centos9"
-          - "microos"
-          - "slemicro"
         arch:
           - "amd64"
-          - "srcrpm"
-          - "arm64"
         include:
-          - arch: "srcrpm"
-            upload-script: "sign-and-upload"
-            build: "x86_64-amd64"
           - arch: "amd64"
             upload-script: "sign-and-upload"
             build: "x86_64-amd64"
-          - arch: "arm64"
-            upload-script: "sign-and-upload"
-            build: "aarch64-arm64"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: "Read secrets"
-        uses: rancher-eio/read-vault-secrets@main
+      
+      - name: Test Build Simulation (Skip vault/build for testing)
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
+          MATRIX_OS: ${{ matrix.os }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          echo "🧪 TEST MODE: Simulating build process"
+          echo "Tag: $TAG"
+          echo "OS: $MATRIX_OS"
+          echo "Arch: $MATRIX_ARCH"
+          echo "Build: ${{ matrix.build }}"
+          echo "Upload Script: ${{ matrix.upload-script }}"
+          
+          # Create fake dist directory structure for testing
+          mkdir -p dist/$MATRIX_OS/x86_64
+          echo "fake-package-content" > dist/$MATRIX_OS/x86_64/rke2-test-$TAG.rpm
+          
+          echo "✅ Test build simulation completed"
+      
+      - name: Test Checksum (Simulation)
+        run: |
+          echo "🧪 TEST MODE: Simulating checksum creation"
+          cd dist/${{ matrix.os }}/x86_64
+          echo "fake-checksum  rke2-test-${{ github.event.inputs.tag_name || github.ref_name }}.rpm" > "sha256sum-${{ matrix.os }}-${{ matrix.arch }}.txt"
+          echo "✅ Test checksum simulation completed"
+
+  trigger-validation:
+    runs-on: ubuntu-latest
+    needs: publish
+    if: always() && (needs.publish.result == 'success')
+    steps:
+      - name: Trigger distros validation workflow
+        uses: actions/github-script@v7
         with:
-          secrets: |
-            secret/data/github/repo/${{ github.repository }}/private-key/credentials privateKey | PRIVATE_KEY ;
-            secret/data/github/repo/${{ github.repository }}/private-key-pass-phrase/credentials token | PRIVATE_KEY_PASS_PHRASE ;
-            secret/data/github/repo/${{ github.repository }}/testing-private-key/credentials privateKey | TESTING_PRIVATE_KEY ;
-            secret/data/github/repo/${{ github.repository }}/testing-private-key-pass-phrase/credentials token | TESTING_PRIVATE_KEY_PASS_PHRASE ;
-            secret/data/github/repo/${{ github.repository }}/aws-s3-bucket/credentials token | AWS_S3_BUCKET ;
-            secret/data/github/repo/${{ github.repository }}/aws-access-key-id/credentials token | AWS_ACCESS_KEY_ID ;
-            secret/data/github/repo/${{ github.repository }}/aws-secret-access-key/credentials token | AWS_SECRET_ACCESS_KEY ;
-            secret/data/github/repo/${{ github.repository }}/testing-aws-s3-bucket/credentials token | TESTING_AWS_S3_BUCKET ;
-            secret/data/github/repo/${{ github.repository }}/testing-aws-access-key-id/credentials token | TESTING_AWS_ACCESS_KEY_ID ;
-            secret/data/github/repo/${{ github.repository }}/testing-aws-secret-access-key/credentials token | TESTING_AWS_SECRET_ACCESS_KEY ;
-      - name: Install Dapper
-        run: |
-          mkdir -p .local/bin
-          curl -sL https://releases.rancher.com/dapper/latest/dapper-$(uname -s)-$(uname -m) > .local/bin/dapper
-          chmod +x .local/bin/dapper
-          echo ".local/bin" >> $GITHUB_PATH
-      - name: Build
-        env:
-          TAG: ${{ github.ref_name }}
-          COMBARCH: ${{ matrix.build }}
-          AWS_S3_BUCKET: ${{ env.AWS_S3_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          TESTING_AWS_S3_BUCKET: ${{ env.TESTING_AWS_S3_BUCKET }}
-          TESTING_AWS_ACCESS_KEY_ID: ${{ env.TESTING_AWS_ACCESS_KEY_ID }}
-          TESTING_AWS_SECRET_ACCESS_KEY: ${{ env.TESTING_AWS_SECRET_ACCESS_KEY }}
-        run: |
-          dapper -f Dockerfile.${{ matrix.os }}.dapper rpm/${{ matrix.os }}/scripts/build
-      - name: Sign and upload to S3
-        env:
-          TAG: ${{ github.ref_name }}
-          COMBARCH: ${{ matrix.build }}
-          UPLOAD_ARCH: ${{ matrix.arch }}
-          PRIVATE_KEY: ${{ env.PRIVATE_KEY }}
-          PRIVATE_KEY_PASS_PHRASE: ${{ env.PRIVATE_KEY_PASS_PHRASE }}
-          TESTING_PRIVATE_KEY: ${{ env.TESTING_PRIVATE_KEY }}
-          TESTING_PRIVATE_KEY_PASS_PHRASE: ${{ env.TESTING_PRIVATE_KEY_PASS_PHRASE }}
-          AWS_S3_BUCKET: ${{ env.AWS_S3_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          TESTING_AWS_S3_BUCKET: ${{ env.TESTING_AWS_S3_BUCKET }}
-          TESTING_AWS_ACCESS_KEY_ID: ${{ env.TESTING_AWS_ACCESS_KEY_ID }}
-          TESTING_AWS_SECRET_ACCESS_KEY: ${{ env.TESTING_AWS_SECRET_ACCESS_KEY }}
-        run: |
-          docker run --rm \
-            -v "$(pwd):/workspace" \
-            -w /workspace \
-            -e TAG="$TAG" \
-            -e PRIVATE_KEY="$PRIVATE_KEY" \
-            -e PRIVATE_KEY_PASS_PHRASE="$PRIVATE_KEY_PASS_PHRASE" \
-            -e TESTING_PRIVATE_KEY="$TESTING_PRIVATE_KEY" \
-            -e TESTING_PRIVATE_KEY_PASS_PHRASE="$TESTING_PRIVATE_KEY_PASS_PHRASE" \
-            -e COMBARCH="$COMBARCH" \
-            -e UPLOAD_ARCH="$UPLOAD_ARCH" \
-            -e AWS_S3_BUCKET="$AWS_S3_BUCKET" \
-            -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
-            -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-            -e TESTING_AWS_S3_BUCKET="$TESTING_AWS_S3_BUCKET" \
-            -e TESTING_AWS_ACCESS_KEY_ID="$TESTING_AWS_ACCESS_KEY_ID" \
-            -e TESTING_AWS_SECRET_ACCESS_KEY="$TESTING_AWS_SECRET_ACCESS_KEY" \
-            quay.io/centos/centos:stream9 \
-            rpm/${{ matrix.os }}/scripts/${{ matrix.upload-script }}
-      - name: Checksum
-        run: |
-          if [ "${{ matrix.arch }}" = "srcrpm" ]; then
-            cd dist/${{ matrix.os }}/source
-          elif [ "${{ matrix.arch }}" = "arm64" ]; then
-            cd dist/${{ matrix.os }}/aarch64
-          else
-            cd dist/${{ matrix.os }}/x86_64
-          fi
+          github-token: ${{ secrets.DISPATCH_TOKEN }}
+          script: |
+            // Extract version from the release tag
+            const releaseTag = '${{ github.ref_name }}';
+            console.log(`Release tag: ${releaseTag}`);
+            
+            // Create the payload for the repository dispatch
+            const response = await github.rest.repos.createDispatchEvent({
+              owner: 'fmoral2', 
+              repo: 'distros-test-framework',
+              event_type: 'rke2-release-validation',
+              client_payload: {
+                rke2_versions: releaseTag,
+                source_repo: '${{ github.repository }}', 
+                release_url: '${{ github.event.release.html_url }}',
+                triggered_by: '${{ github.actor }}'
+              } 
+            });
 
-          find *.rpm -type f | while read -r file; do
-            sha256sum "$file" | awk '{print $1 "  " $2}' >> "sha256sum-${{ matrix.os }}-${{ matrix.arch }}.txt"
-          done
-      - name: Upload to GitHub
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OS: ${{ matrix.os }}
-        run: |
-          if [ "${{ matrix.arch }}" = "srcrpm" ]; then
-            cd dist/${{ matrix.os }}/source
-          elif [ "${{ matrix.arch }}" = "arm64" ]; then
-            cd dist/${{ matrix.os }}/aarch64
-          else
-            cd dist/${{ matrix.os }}/x86_64
-          fi
-
-          gh release upload ${{ github.ref_name }} *
+            console.log(`Response: ${JSON.stringify(response)}`);
+            console.log(`Triggered validation workflow for RKE2 version: ${releaseTag}`);
+       
